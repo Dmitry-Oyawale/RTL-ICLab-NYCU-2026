@@ -365,3 +365,54 @@ function [11:0] ccm_b;
         ccm_b = clip12(t);
     end
 endfunction
+
+function [35:0] calc_rgb_pixel;
+    input [7:0] idx;
+    integer x, y;
+    reg [11:0] n, s, e, w, nw, ne, sw, se, c;
+    reg [11:0] rr, gg, bb;
+    reg [11:0 ] ro, go, bo;
+    reg [1:0] typ;
+    begin 
+        x = get_x(idx);
+        y = get_y(idx);
+        n = get_dpc(x, y - 1);
+        s = get_dpc(x, y + 1);
+        e = get_dpc(x + 1, y);
+        w = get_dpc(x -1, y);
+        nw = get_dpc(x - 1, y - 1);
+        ne = get_dpc(x + 1, y - 1);
+        sw = get_dpc(x - 1, y + 1);
+        se = get_dpc(x + 1, y + 1);
+        typ = bayer_type(x, y);
+        
+        case (typ)
+            2'd0: begin
+                rr = c;
+                gg = avg4(n, s, e, w);
+                bb = avg4(nw, ne, sw, se);
+            end
+            2'd3: begin
+                rr = avg4(nw, ne, sw, se);
+                gg = avg4(n, s, e, w);
+                bb = c;
+            end
+            2'd1: begin
+                rr = avg2(w, e);
+                gg = c;
+                bb = avg2(n, s);
+            end
+            default: begin
+                rr = avg2(n, s);
+                gg = c;
+                bb = av2(w, e);
+            end
+        endcase
+
+        ro = ccm_r(rr, gg, bb);
+        go = ccm_g(rr, gg, bb);
+        bo = ccm_b(rr, gg, bb);
+        
+        calc_rgb_pixel = {ro, go , bo};
+    end
+endfunction
