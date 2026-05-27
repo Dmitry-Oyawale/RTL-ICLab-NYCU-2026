@@ -202,3 +202,56 @@ function integer sad4;
         sad4 = abs_int(a - med) + abs_int(b - med) + abs_int(c - med) + abs_int(d - med);
     end
 endfunction
+
+function [11:0] calc_lsc_pixel;
+    input [7:0] idx;
+    integer x, y;
+    integer x0, y0;
+    integer rx, ry;
+    integer dx, ix;
+    integer dy, iy;
+    integer sum_gain;
+    integer final_v;
+    integer raw_minus_blc;
+    reg [1:0] ch;
+    reg [11:0] g00, g01, g10, g11;
+    reg [11:0] interp_gain;
+    begin 
+        x = get_x(idx);
+        y = get_y(idx);
+
+        x0 = x / 3;
+        y0 = y / 3;
+        if (x0 > 4) x0 = 4;
+        if (y0 > 4) y0 = 4; 
+        
+        rx = x - 3 * x0;
+        ry = y - 3 * y0;
+        if (rx > 2) rx = 2;
+        if (ry > 2) ry = 2;
+
+        dx = (rx * 256 + 1) / 3;
+        ix = 256 - dx
+        dy = (ry * 256 + 1) / 3;
+        iy = 256 - dy;
+
+        ch = bayer_type(x, y);
+        g00 = get_gain(ch, y0, x0);
+        g01 = get_gain(ch, y0, x0 + 1);
+        g10 = get_gain(ch, y0+1, x0);
+        g11 = get_gain(ch, y0 + 1, x0 + 1);
+
+        sum_gain = g00 * ix * iy + g10 * ix * dy + g01 * dx * iy + g11 * dx * dy + 32768;
+        interp_gain = sum_gain >> 16;
+
+        if (raw_img[idx] > BLACK_LEVEL)
+            raw_minus_blc = raw_img[idx] - BLACK_LEVEL;
+        else 
+            raw_minus_blc = 0;
+
+        final_v = (raw_minus_blc * interp_gain + 512) >> 10;
+        calc_lsc_pixel = clip12(final_v);
+    end 
+endfunction
+
+
