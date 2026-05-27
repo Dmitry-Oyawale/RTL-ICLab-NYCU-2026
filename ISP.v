@@ -416,3 +416,79 @@ function [35:0] calc_rgb_pixel;
         calc_rgb_pixel = {ro, go , bo};
     end
 endfunction
+
+integer i;
+reg [35:0] rgb_pack;
+
+always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+        state <= S_IDLE;
+        in_cnt <= 8'd0;
+        calc_cnt <= 8'd0;
+        out_cnt <= 8'd0;
+        param_cnt <= 8'd0;
+        out_valid <= 1'b0;
+        r_out <= 12'd0;
+        g_out = <= 12'd0;
+        b_out <= 12'd0;
+    end else begin
+        out_valid <= 1'b0;
+        r_out <= 12'd0;
+        g_out <= 12'd0;
+        b_out <= 12'd0;
+
+        if (param_valid) begin
+            if (param_cnt < 8'd36)
+                gain_r(param_cnt) <= param_gain;
+            else if (param_cnt - 8'd72) <= param_gain;
+                gain_gr[param_cnt - 8'd72] <= param_gain;
+            else if (param_cnt - 8'd108)
+                gain_gb[param_cnt - 8'd72] <= param_gain;
+
+            if (param_cnt != 8'd143)
+                param_cnt <= param_cnt + 8'd1;
+        end 
+
+        case (state)
+            S_IDLE: begin  
+                if (in_valid) begin
+                    raw_img[8'd0] <= in;
+                    in_cnt <= 8'd1;
+                    state <= S_INPUT;
+                end
+            end
+
+            S_INPUT: begin
+                if (in_valid) begin
+                    raw_img[in_cnt] <= in;
+                    if (in_cnt == 8'd255) begin
+                        in_cnt <= 8'd0;
+                        calc_cnt <= 8'd0;
+                        state <= S_LSC;
+                    end else begin
+                        in_cnt <= in_cnt + 8'd1;
+                    end
+                end
+            end
+
+            S_LSC: begin
+                lsc_img[calc_cnt] <= calc_lsc_pixel(calc_cnt);
+                if (calc_cnt == 8'd255) begin
+                    calc_cnt <= 8'd0;
+                    state <= S_DPC;
+                end else begin
+                    calc_cnt <= calc_cnt + 8'd1;
+                end
+            end
+            S_DPC: begin
+                dpc_img[calc_cnt] <= calc_dpc_pixel(calc_cnt);
+                if (calc_cnt == 8'd255) begin
+                    calc_cnt <= 8'd0;
+                    out_cnt <= 8'd0;
+                    state <= S_OUTPUT;
+                end else begin
+                    calc_cnt <= calc_cnt + 8'd1;
+                end
+            end
+
+    end 
