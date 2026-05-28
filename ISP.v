@@ -15,9 +15,6 @@ module ISP(
     b_out
     );
 
-//==============================
-//   INPUT/OUTPUT DECLARATION
-//==============================
 input clk;
 input rst_n;
 input in_valid;
@@ -30,17 +27,13 @@ output reg [11:0] r_out;
 output reg [11:0] g_out;
 output reg [11:0] b_out;
 
-localparam IMG_W = 16;
-localparam IMG_H = 16;
-localparam TOTAL_PIXELS = 256;
 localparam TH = 320;
-localparam BLACK_LEVEL = 64;
 
-localparam S_IDLE     = 3'd0;
-localparam S_INPUT    = 3'd1;
-localparam S_LSC      = 3'd2;
-localparam S_DPC      = 3'd3;
-localparam S_OUTPUT   = 3'd4;
+localparam S_IDLE   = 3'd0;
+localparam S_INPUT  = 3'd1;
+localparam S_LSC    = 3'd2;
+localparam S_DPC    = 3'd3;
+localparam S_OUTPUT = 3'd4;
 
 reg [2:0] state;
 reg [7:0] in_cnt;
@@ -56,6 +49,8 @@ reg [11:0] gain_r  [0:35];
 reg [11:0] gain_gr [0:35];
 reg [11:0] gain_gb [0:35];
 reg [11:0] gain_b  [0:35];
+
+reg [35:0] rgb_pack;
 
 
 function [3:0] get_x;
@@ -101,28 +96,24 @@ function [1:0] bayer_type;
     input integer y;
     begin
         if ((y % 2) == 0 && (x % 2) == 0)
-            bayer_type = 2'd0;       
+            bayer_type = 2'd0;       // R
         else if ((y % 2) == 0 && (x % 2) == 1)
-            bayer_type = 2'd1;      
+            bayer_type = 2'd1;       // Gr
         else if ((y % 2) == 1 && (x % 2) == 0)
-            bayer_type = 2'd2;       
+            bayer_type = 2'd2;       // Gb
         else
-            bayer_type = 2'd3;       
+            bayer_type = 2'd3;       // B
     end
 endfunction
 
-function [11:0] get_gain;
+function [11:0] black_level;
     input [1:0] ch;
-    input integer row;
-    input integer col;
-    integer gidx;
     begin
-        gidx = row * 6 + col;
         case (ch)
-            2'd0: get_gain = gain_r[gidx];
-            2'd1: get_gain = gain_gr[gidx];
-            2'd2: get_gain = gain_gb[gidx];
-            default: get_gain = gain_b[gidx];
+            2'd0: black_level = 12'd64;  // R
+            2'd1: black_level = 12'd48;  // Gr
+            2'd2: black_level = 12'd52;  // Gb
+            default: black_level = 12'd72; // B
         endcase
     end
 endfunction
@@ -154,7 +145,8 @@ function [11:0] avg2;
     input [11:0] b;
     integer t;
     begin
-        t = a + b;
+        t = a;
+        t = t + b;
         avg2 = t >> 1;
     end
 endfunction
@@ -166,7 +158,10 @@ function [11:0] avg4;
     input [11:0] d;
     integer t;
     begin
-        t = a + b + c + d;
+        t = a;
+        t = t + b;
+        t = t + c;
+        t = t + d;
         avg4 = t >> 2;
     end
 endfunction
@@ -177,14 +172,22 @@ function [11:0] median4;
     input [11:0] c;
     input [11:0] d;
     reg [11:0] v0, v1, v2, v3, tmp;
+    integer t;
     begin
-        v0 = a; v1 = b; v2 = c; v3 = d;
+        v0 = a;
+        v1 = b;
+        v2 = c;
+        v3 = d;
+
         if (v0 > v1) begin tmp = v0; v0 = v1; v1 = tmp; end
         if (v2 > v3) begin tmp = v2; v2 = v3; v3 = tmp; end
         if (v0 > v2) begin tmp = v0; v0 = v2; v2 = tmp; end
         if (v1 > v3) begin tmp = v1; v1 = v3; v3 = tmp; end
         if (v1 > v2) begin tmp = v1; v1 = v2; v2 = tmp; end
-        median4 = (v1 + v2) >> 1;
+
+        t = v1;
+        t = t + v2;
+        median4 = t >> 1;
     end
 endfunction
 
@@ -195,7 +198,27 @@ function integer sad4;
     input [11:0] d;
     input [11:0] med;
     begin
-        sad4 = abs_int(a - med) + abs_int(b - med) + abs_int(c - med) + abs_int(d - med);
+        sad4 = abs_int(a - med)
+             + abs_int(b - med)
+             + abs_int(c - med)
+             + abs_int(d - med);
+    end
+endfunction
+
+function [11:0] get_gain;
+    input [1:0] ch;
+    input integer row;
+    input integer col;
+    integer gidx;
+    begin
+        gidx = row * 6 + col;
+
+        case (ch)
+            2'd0: get_gain = gain_r[gidx];
+            2'd1: get_gain = gain_gr[gidx];
+            2'd2: get_gain = gain_gb[gidx];
+            default: get_gain = gain_b[gidx];
+        endcase
     end
 endfunction
 
@@ -208,13 +231,22 @@ function [11:0] calc_lsc_pixel;
     integer dy, iy;
     integer sum_gain;
     integer final_v;
-    integer raw_minus_blc;
+    integer blc_v;
     reg [1:0] ch;
     reg [11:0] g00, g01, g10, g11;
     reg [11:0] interp_gain;
+    reg [11:0] bl;
     begin
         x = get_x(idx);
         y = get_y(idx);
+
+        ch = bayer_type(x, y);
+        bl = black_level(ch);
+
+        if (raw_img[idx] > bl)
+            blc_v = raw_img[idx] - bl;
+        else
+            blc_v = 0;
 
         x0 = x / 3;
         y0 = y / 3;
@@ -231,21 +263,21 @@ function [11:0] calc_lsc_pixel;
         dy = (ry * 256 + 1) / 3;
         iy = 256 - dy;
 
-        ch = bayer_type(x, y);
         g00 = get_gain(ch, y0,     x0);
         g01 = get_gain(ch, y0,     x0 + 1);
         g10 = get_gain(ch, y0 + 1, x0);
         g11 = get_gain(ch, y0 + 1, x0 + 1);
 
-        sum_gain = g00 * ix * iy + g10 * ix * dy + g01 * dx * iy + g11 * dx * dy + 32768;
+        sum_gain = g00 * ix * iy
+                 + g10 * ix * dy
+                 + g01 * dx * iy
+                 + g11 * dx * dy
+                 + 32768;
+
         interp_gain = sum_gain >> 16;
 
-        if (raw_img[idx] > BLACK_LEVEL)
-            raw_minus_blc = raw_img[idx] - BLACK_LEVEL;
-        else
-            raw_minus_blc = 0;
+        final_v = (blc_v * interp_gain + 512) >> 10;
 
-        final_v = (raw_minus_blc * interp_gain + 512) >> 10;
         calc_lsc_pixel = clip12(final_v);
     end
 endfunction
@@ -261,6 +293,7 @@ function [11:0] calc_dpc_pixel;
     reg [11:0] mh, mv, md1, md2;
     integer sh, sv, sd1, sd2;
     reg [11:0] target;
+    integer best_score;
     begin
         x = get_x(idx);
         y = get_y(idx);
@@ -296,18 +329,22 @@ function [11:0] calc_dpc_pixel;
         sd1 = sad4(d10, d11, d12, d13, md1);
         sd2 = sad4(d20, d21, d22, d23, md2);
 
-        // Tie-breaking priority: H > V > D1 > D2
         target = mh;
-        if (sv < sh) begin
+        best_score = sh;
+
+        if (sv < best_score) begin
             target = mv;
-            sh = sv;
+            best_score = sv;
         end
-        if (sd1 < sh) begin
+
+        if (sd1 < best_score) begin
             target = md1;
-            sh = sd1;
+            best_score = sd1;
         end
-        if (sd2 < sh) begin
+
+        if (sd2 < best_score) begin
             target = md2;
+            best_score = sd2;
         end
 
         if (abs_int(p - target) > TH)
@@ -364,7 +401,9 @@ endfunction
 function [35:0] calc_rgb_pixel;
     input [7:0] idx;
     integer x, y;
-    reg [11:0] n, s, e, w, nw, ne, sw, se, c;
+    reg [11:0] n, s, e, w;
+    reg [11:0] nw, ne, sw, se;
+    reg [11:0] c;
     reg [11:0] rr, gg, bb;
     reg [11:0] ro, go, bo;
     reg [1:0] typ;
@@ -412,9 +451,6 @@ function [35:0] calc_rgb_pixel;
         calc_rgb_pixel = {ro, go, bo};
     end
 endfunction
-
-integer i;
-reg [35:0] rgb_pack;
 
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
